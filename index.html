@@ -1,0 +1,157 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#15130f">
+  <title>听见 · 视唱练耳</title>
+  <link rel="stylesheet" href="styles.css?v=3">
+</head>
+<body>
+  <main class="app-shell">
+    <header class="hero">
+      <div>
+        <p class="eyebrow">EAR TRAINING LAB</p>
+        <h1>听见</h1>
+        <p class="subtitle">听一组音，把它唱回来。</p>
+      </div>
+      <div class="status-pill" id="micStatus">
+        <span class="status-dot"></span>
+        麦克风未启用
+      </div>
+    </header>
+
+    <section class="panel settings-panel" aria-labelledby="settingsTitle">
+      <div class="section-heading">
+        <div>
+          <p class="step-label">01 · 设置</p>
+          <h2 id="settingsTitle">生成你的练习</h2>
+        </div>
+        <button class="text-button" id="newQuestionButton" type="button">换一题</button>
+      </div>
+
+      <div class="settings-grid">
+        <label>
+          <span>音符数量</span>
+          <select id="noteCount">
+            <option value="2">2 个</option>
+            <option value="3" selected>3 个</option>
+            <option value="4">4 个</option>
+            <option value="5">5 个</option>
+            <option value="6">6 个</option>
+          </select>
+        </label>
+        <label>
+          <span>音域</span>
+          <select id="range">
+            <option value="low">低声部 A2–E4</option>
+            <option value="middle" selected>中声部 C3–C5</option>
+            <option value="high">高声部 G3–G5</option>
+          </select>
+        </label>
+        <label>
+          <span>难度</span>
+          <select id="difficulty">
+            <option value="easy" selected>入门 · 自然音</option>
+            <option value="medium">进阶 · 加入升降音</option>
+            <option value="hard">挑战 · 大跳更多</option>
+          </select>
+        </label>
+        <label>
+          <span>评分标准</span>
+          <select id="tolerance">
+            <option value="35">宽松 ±35 音分</option>
+            <option value="25" selected>标准 ±25 音分</option>
+            <option value="15">严格 ±15 音分</option>
+          </select>
+        </label>
+      </div>
+    </section>
+
+    <section class="panel exercise-panel" aria-labelledby="exerciseTitle">
+      <div class="section-heading">
+        <div>
+          <p class="step-label">02 · 听与唱</p>
+          <h2 id="exerciseTitle">先听，不要偷看答案</h2>
+        </div>
+        <div class="attempt-counter">第 <strong id="attemptNumber">1</strong> 题</div>
+      </div>
+
+      <div class="note-track" id="noteTrack" aria-label="练习音符">
+        <div class="note-card hidden-note"><span>?</span></div>
+        <div class="track-line"></div>
+        <div class="note-card hidden-note"><span>?</span></div>
+        <div class="track-line"></div>
+        <div class="note-card hidden-note"><span>?</span></div>
+      </div>
+
+      <div class="primary-actions">
+        <button class="button button-secondary" id="playButton" type="button">
+          <span class="button-icon">▶</span>
+          播放题目
+        </button>
+        <button class="button button-primary" id="singButton" type="button">
+          <span class="button-icon" id="singButtonIcon">●</span>
+          <span id="singButtonText">开始演唱</span>
+        </button>
+      </div>
+
+      <div class="singing-console" id="singingConsole" hidden>
+        <div class="target-copy">
+          <span>连续哼出完整乐句</span>
+          <span id="holdHint">唱完后点击结束</span>
+        </div>
+        <div class="pitch-readout">
+          <div>
+            <span class="detected-label">检测到</span>
+            <strong id="detectedNote">--</strong>
+            <small id="detectedFrequency">等待声音</small>
+          </div>
+          <div class="meter-wrap">
+            <div class="meter-labels">
+              <span>偏低</span>
+              <span>准</span>
+              <span>偏高</span>
+            </div>
+            <div class="pitch-meter">
+              <div class="meter-center"></div>
+              <div class="meter-needle" id="meterNeedle"></div>
+            </div>
+            <p id="centsDisplay">保持一个清晰、稳定的元音</p>
+          </div>
+        </div>
+        <div class="input-monitor">
+          <span>输入音量</span>
+          <div class="volume-meter" aria-label="麦克风输入音量">
+            <div id="volumeBar"></div>
+          </div>
+          <span id="inputState">等待声音</span>
+        </div>
+        <div class="recording-time">已录制 <strong id="recordingTime">0.0</strong> 秒</div>
+      </div>
+
+      <p class="helper-text" id="helperText">播放并记住乐句，然后一口气自然哼完全部音符。</p>
+    </section>
+
+    <section class="panel result-panel" id="resultPanel" hidden aria-live="polite">
+      <div class="score-ring">
+        <strong id="totalScore">0</strong>
+        <span>音准准确率</span>
+      </div>
+      <div class="result-content">
+        <p class="step-label">03 · 结果</p>
+        <h2 id="resultTitle">完成练习</h2>
+        <div class="result-list" id="resultList"></div>
+        <button class="button button-primary compact" id="nextButton" type="button">下一题</button>
+      </div>
+    </section>
+
+    <footer>
+      <span>所有音频只在你的浏览器中处理，不会上传。</span>
+      <span>请使用 Chrome、Edge 或 Safari 最新版。</span>
+    </footer>
+  </main>
+
+  <script src="app.js?v=4"></script>
+</body>
+</html>
