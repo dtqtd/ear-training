@@ -46,6 +46,7 @@ let mediaStream;
 let sourceNode;
 let animationFrame;
 let playbackTimer;
+let playbackOscillators = [];
 let pitchHistory = [];
 let recordedPitches = [];
 let recordingStartedAt = 0;
@@ -86,7 +87,8 @@ function median(values) {
 }
 
 function createSequence() {
-  stopListening({ message: "" });
+  pauseListening({ message: "" });
+  resetPlayback();
   const count = Number(els.noteCount.value);
   const [min, max] = RANGES[els.range.value];
   const difficulty = els.difficulty.value;
@@ -149,11 +151,46 @@ function setActiveNote(index) {
   });
 }
 
-async function getAudioContext() {
-  if (!audioContext || audioContext.state === "closed") {
-    audioContext = new (window.AudioContext || window.webkitAudioContext)();
+function createAudioContext() {
+  const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+  try {
+    return new AudioContextClass({ latencyHint: "interactive" });
+  } catch (error) {
+    return new AudioContextClass();
   }
-  if (audioContext.state === "suspended") await audioContext.resume();
+}
+
+async function getAudioContext({ recreate = false } = {}) {
+  if (recreate && audioContext && audioContext.state !== "closed") {
+    await audioContext.close().catch(() => {});
+    audioContext = null;
+  }
+  if (!audioContext || audioContext.state === "closed") {
+    audioContext = createAudioContext();
+  }
+
+  if (audioContext.state !== "running") {
+    await audioContext.resume().catch(() => {});
+  }
+
+  // Safari can leave a context in its non-standard "interrupted" state after
+  // repeated reloads, calls, or backgrounding. Recreate it from this user tap.
+  if (audioContext.state !== "running") {
+    await audioContext.close().catch(() => {});
+    audioContext = createAudioContext();
+    await audioContext.resume().catch(() => {});
+  }
+
+  if (audioContext.state !== "running") {
+    throw new Error(`AudioContext is ${audioContext.state}`);
+  }
+
+  // A silent buffer unlocks output reliably on iOS Safari.
+  const unlockBuffer = audioContext.createBuffer(1, 1, audioContext.sampleRate);
+  const unlockSource = audioContext.createBufferSource();
+  unlockSource.buffer = unlockBuffer;
+  unlockSource.connect(audioContext.destination);
+  unlockSource.start(0);
   return audioContext;
 }
 
@@ -163,7 +200,12 @@ async function playSequence() {
   els.playButton.disabled = true;
   els.singButton.disabled = true;
   try {
-    const context = await getAudioContext();
+    let context;
+    try {
+      context = await getAudioContext();
+    } catch (error) {
+      context = await getAudioContext({ recreate: true });
+    }
     const startAt = context.currentTime + 0.08;
     const noteLength = 0.72;
     sequence.forEach((midi, index) => {
@@ -179,6 +221,10 @@ async function playSequence() {
       oscillator.connect(gain).connect(context.destination);
       oscillator.start(noteStart);
       oscillator.stop(noteStart + 0.68);
+      playbackOscillators.push(oscillator);
+      oscillator.addEventListener("ended", () => {
+        playbackOscillators = playbackOscillators.filter((item) => item !== oscillator);
+      });
       window.setTimeout(() => setActiveNote(index), Math.max(0, (noteStart - context.currentTime) * 1000));
     });
     playbackTimer = window.setTimeout(resetPlayback, sequence.length * noteLength * 1000 + 150);
@@ -190,6 +236,14 @@ async function playSequence() {
 
 function resetPlayback() {
   clearTimeout(playbackTimer);
+  playbackOscillators.forEach((oscillator) => {
+    try {
+      oscillator.stop();
+    } catch (error) {
+      // The oscillator may already have ended.
+    }
+  });
+  playbackOscillators = [];
   document.querySelectorAll(".note-card").forEach((card) => card.classList.remove("active"));
   els.playButton.disabled = false;
   els.singButton.disabled = false;
@@ -227,29 +281,41 @@ async function startListening() {
 
   isStarting = true;
   cancelStartRequested = false;
+  const canReuseMicrophone = mediaStream?.getAudioTracks()
+    .some((track) => track.readyState === "live");
   setListeningButton(false, true);
   els.singingConsole.hidden = false;
-  els.inputState.textContent = "正在请求权限";
-  els.helperText.textContent = "请在浏览器权限提示中选择“允许”。";
+  els.inputState.textContent = canReuseMicrophone ? "正在连接" : "正在请求权限";
+  els.helperText.textContent = canReuseMicrophone
+    ? "正在重新使用已授权的麦克风。"
+    : "首次使用时，请在浏览器权限提示中选择“允许”。";
 
   try {
     // Resume Web Audio while this click still counts as a user gesture.
     const context = await getAudioContext();
-    const stream = await navigator.mediaDevices.getUserMedia({
-      audio: {
-        channelCount: 1,
-        echoCancellation: true,
-        noiseSuppression: false,
-        autoGainControl: true,
-      },
-    });
+    const hasLiveTrack = mediaStream?.getAudioTracks()
+      .some((track) => track.readyState === "live");
+    const stream = hasLiveTrack
+      ? mediaStream
+      : await navigator.mediaDevices.getUserMedia({
+        audio: {
+          channelCount: 1,
+          echoCancellation: true,
+          noiseSuppression: false,
+          autoGainControl: true,
+        },
+      });
 
     if (cancelStartRequested) {
-      stream.getTracks().forEach((track) => track.stop());
+      if (!hasLiveTrack) stream.getTracks().forEach((track) => track.stop());
       return;
     }
 
     mediaStream = stream;
+    mediaStream.getAudioTracks().forEach((track) => {
+      track.enabled = true;
+    });
+    if (sourceNode) sourceNode.disconnect();
     sourceNode = context.createMediaStreamSource(stream);
     analyser = context.createAnalyser();
     analyser.fftSize = 2048;
@@ -300,22 +366,41 @@ function resetPitchState() {
 }
 
 function stopListening({ message = "已停止麦克风检测。" } = {}) {
+  pauseListening({ message });
+  releaseMicrophone();
+}
+
+function pauseListening({ message = "已暂停麦克风检测。" } = {}) {
   cancelStartRequested = true;
   isListening = false;
   if (animationFrame) cancelAnimationFrame(animationFrame);
   animationFrame = null;
   if (sourceNode) sourceNode.disconnect();
   sourceNode = null;
-  if (mediaStream) mediaStream.getTracks().forEach((track) => track.stop());
-  mediaStream = null;
   analyser = null;
+  if (mediaStream) {
+    mediaStream.getAudioTracks().forEach((track) => {
+      track.enabled = false;
+    });
+  }
   resetPitchState();
-  els.micStatus.classList.remove("active");
-  els.micStatus.lastChild.textContent = " 麦克风未启用";
+  const hasLiveTrack = mediaStream?.getAudioTracks()
+    .some((track) => track.readyState === "live");
+  els.micStatus.classList.toggle("active", Boolean(hasLiveTrack));
+  els.micStatus.lastChild.textContent = hasLiveTrack
+    ? " 麦克风已就绪"
+    : " 麦克风未启用";
   els.playButton.disabled = false;
   setListeningButton(false);
   document.querySelectorAll(".note-card").forEach((card) => card.classList.remove("active"));
   if (message) els.helperText.textContent = message;
+}
+
+function releaseMicrophone() {
+  if (mediaStream) mediaStream.getTracks().forEach((track) => track.stop());
+  mediaStream = null;
+  els.micStatus.classList.remove("active");
+  els.micStatus.lastChild.textContent = " 麦克风未启用";
 }
 
 // YIN pitch detection is substantially more reliable for sung notes than
@@ -433,13 +518,13 @@ function updatePitchUI(frequency, rms) {
 function finishPhraseRecording() {
   const duration = performance.now() - recordingStartedAt;
   if (duration < MIN_RECORDING_MS || recordedPitches.length < sequence.length * 3) {
-    stopListening({ message: "录到的声音太少，请重新开始并连续哼完整句。" });
+    pauseListening({ message: "录到的声音太少，请重新开始并连续哼完整句。" });
     els.singingConsole.hidden = true;
     return;
   }
 
   const captured = [...recordedPitches];
-  stopListening({ message: "" });
+  pauseListening({ message: "" });
   const detectedNotes = splitPitchTrack(captured, sequence.length);
   if (!detectedNotes) {
     els.singingConsole.hidden = true;
@@ -565,6 +650,17 @@ els.nextButton.addEventListener("click", nextQuestion);
 [els.noteCount, els.range, els.difficulty].forEach((input) => {
   input.addEventListener("change", createSequence);
 });
-window.addEventListener("beforeunload", () => stopListening({ message: "" }));
+window.addEventListener("pagehide", () => {
+  releaseMicrophone();
+  resetPlayback();
+  if (audioContext && audioContext.state !== "closed") {
+    audioContext.close().catch(() => {});
+  }
+});
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "visible" && audioContext?.state === "interrupted") {
+    audioContext.resume().catch(() => {});
+  }
+});
 
 createSequence();
