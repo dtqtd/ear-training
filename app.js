@@ -94,6 +94,8 @@ const els = {
   chordLevelSetting: document.querySelector("#chordLevelSetting"),
   chordKey: document.querySelector("#chordKey"),
   chordKeySetting: document.querySelector("#chordKeySetting"),
+  octaveDirection: document.querySelector("#octaveDirection"),
+  octaveDirectionSetting: document.querySelector("#octaveDirectionSetting"),
   noteTrack: document.querySelector("#noteTrack"),
   playButton: document.querySelector("#playButton"),
   singButton: document.querySelector("#singButton"),
@@ -124,6 +126,7 @@ const els = {
 
 let sequence = [];
 let chordProgression = [];
+let octaveQuestion = null;
 let currentMode = "melody";
 let chordKey = 0;
 let chordLevel = "triads";
@@ -209,6 +212,10 @@ function createSequence() {
     createChordQuestion();
     return;
   }
+  if (currentMode === "octave") {
+    createOctaveQuestion();
+    return;
+  }
 
   createMelodyQuestion();
 }
@@ -271,6 +278,26 @@ function createChordQuestion() {
   renderChordAnswerInputs();
 }
 
+function createOctaveQuestion() {
+  const direction = els.octaveDirection.value === "random"
+    ? randomItem(["up", "down"])
+    : els.octaveDirection.value;
+  const [min, max] = direction === "up" ? [45, 64] : [60, 79];
+  const source = min + Math.floor(Math.random() * (max - min + 1));
+  const target = source + (direction === "up" ? 12 : -12);
+  octaveQuestion = { direction, source, target };
+  sequence = [target];
+
+  els.singButton.disabled = false;
+  els.singButton.hidden = false;
+  els.playButton.disabled = false;
+  els.submitAnswerButton.disabled = true;
+  els.helperText.textContent = direction === "up"
+    ? "播放低音后，直接唱出它的高八度音。"
+    : "播放高音后，直接唱出它的低八度音。";
+  renderOctaveCards(false);
+}
+
 function renderNotes(reveal = false) {
   els.noteTrack.innerHTML = "";
   sequence.forEach((midi, index) => {
@@ -290,17 +317,50 @@ function renderNotes(reveal = false) {
   });
 }
 
+function renderOctaveCards(reveal = false) {
+  els.noteTrack.innerHTML = "";
+  const sourceLabel = midiToLabel(octaveQuestion.source);
+  const targetLabel = midiToLabel(octaveQuestion.target);
+  const directionText = octaveQuestion.direction === "up" ? "高八度" : "低八度";
+  [
+    {
+      title: reveal ? `${sourceLabel.name}${sourceLabel.octave}` : "原音",
+      detail: "播放给你",
+      hidden: !reveal,
+    },
+    {
+      title: reveal ? `${targetLabel.name}${targetLabel.octave}` : "?",
+      detail: `唱${directionText}`,
+      hidden: !reveal,
+    },
+  ].forEach((item, index) => {
+    const card = document.createElement("div");
+    card.className = `note-card${item.hidden ? " hidden-note" : ""}`;
+    card.dataset.index = index;
+    card.innerHTML = `<span>${item.title}<small>${item.detail}</small></span>`;
+    els.noteTrack.append(card);
+    if (index === 0) {
+      const line = document.createElement("div");
+      line.className = "track-line";
+      els.noteTrack.append(line);
+    }
+  });
+}
+
 function updateModeUI() {
   const chordMode = els.trainingMode.value === "chords";
+  const octaveMode = els.trainingMode.value === "octave";
   els.countLabel.textContent = chordMode ? "和弦数量" : "音符数量";
   const randomCountOption = els.noteCount.querySelector('option[value="random"]');
   if (randomCountOption) {
     randomCountOption.textContent = chordMode ? "任意 2–6 个" : "任意 2–8 个";
   }
-  els.rangeSetting.hidden = chordMode;
-  els.difficultySetting.hidden = chordMode;
+  els.noteCount.closest("label").hidden = octaveMode;
+  els.rangeSetting.hidden = chordMode || octaveMode;
+  els.difficultySetting.hidden = chordMode || octaveMode;
   els.chordLevelSetting.hidden = !chordMode;
   els.chordKeySetting.hidden = !chordMode;
+  els.octaveDirectionSetting.hidden = !octaveMode;
   els.chordAnswerPanel.hidden = !chordMode;
   els.singButton.hidden = chordMode;
   els.playButton.querySelector(".button-icon").textContent = "▶";
@@ -438,6 +498,10 @@ async function playSequence() {
     await playChordProgression();
     return;
   }
+  if (currentMode === "octave") {
+    await playOctavePrompt();
+    return;
+  }
 
   isPlaying = true;
   els.playButton.disabled = true;
@@ -458,6 +522,29 @@ async function playSequence() {
       window.setTimeout(() => setActiveNote(index), Math.max(0, (noteStart - context.currentTime) * 1000));
     });
     playbackTimer = window.setTimeout(resetPlayback, sequence.length * noteLength * 1000 + 150);
+  } catch (error) {
+    console.error(error);
+    els.helperText.textContent = `钢琴音色播放失败：${error.message || "请再点一次播放题目"}`;
+    resetPlayback();
+  }
+}
+
+async function playOctavePrompt() {
+  isPlaying = true;
+  els.playButton.disabled = true;
+  els.singButton.disabled = true;
+  try {
+    let context;
+    try {
+      context = await getAudioContext();
+    } catch (error) {
+      context = await getAudioContext({ recreate: true });
+    }
+    await preloadPianoSamples(context, [octaveQuestion.source]);
+    const startAt = context.currentTime + 0.08;
+    schedulePianoSample(context, octaveQuestion.source, startAt, 1.0, 0.85);
+    window.setTimeout(() => setActiveNote(0), Math.max(0, (startAt - context.currentTime) * 1000));
+    playbackTimer = window.setTimeout(resetPlayback, 1180);
   } catch (error) {
     console.error(error);
     els.helperText.textContent = `钢琴音色播放失败：${error.message || "请再点一次播放题目"}`;
@@ -705,10 +792,16 @@ async function startListening() {
     resetPitchState();
     recordedPitches = [];
     recordingStartedAt = performance.now();
-    renderNotes(false);
+    if (currentMode === "octave") {
+      renderOctaveCards(false);
+    } else {
+      renderNotes(false);
+    }
     document.querySelectorAll(".note-card").forEach((card) => card.classList.add("active"));
     els.playButton.disabled = true;
-    els.helperText.textContent = "现在连续哼出整句，唱完后点击“结束并评分”。";
+    els.helperText.textContent = currentMode === "octave"
+      ? "现在唱出目标八度音，唱稳后点击“结束并评分”。"
+      : "现在连续哼出整句，唱完后点击“结束并评分”。";
     els.micStatus.classList.add("active");
     els.micStatus.lastChild.textContent = " 麦克风检测中";
     setListeningButton(true);
@@ -974,6 +1067,11 @@ function splitPitchTrack(samples, noteCount) {
 }
 
 function scorePhrase(detectedNotes) {
+  if (currentMode === "octave") {
+    scoreOctave(detectedNotes[0]);
+    return;
+  }
+
   const tolerance = Number(els.tolerance.value);
   results = detectedNotes.map((detectedMidi, index) => {
     const cents = 100 * (detectedMidi - sequence[index]);
@@ -1008,6 +1106,43 @@ function scorePhrase(detectedNotes) {
       唱成 ${sung.name}${sung.octave} · ${detail}
     </div>`;
   }).join("");
+  els.resultPanel.hidden = false;
+  els.resultPanel.scrollIntoView({ behavior: "smooth", block: "nearest" });
+}
+
+function scoreOctave(detectedMidi) {
+  const tolerance = Number(els.tolerance.value);
+  const cents = 100 * (detectedMidi - octaveQuestion.target);
+  const excess = Math.max(0, Math.abs(cents) - tolerance);
+  const score = Math.round(Math.max(0, 100 - excess * 1.3));
+  const total = score;
+  const sourceLabel = midiToLabel(octaveQuestion.source);
+  const targetLabel = midiToLabel(octaveQuestion.target);
+  const sungLabel = midiToLabel(Math.round(detectedMidi));
+  const offset = Math.round(cents);
+  const detail = Math.abs(offset) <= 3 ? "准" : `${offset > 0 ? "+" : ""}${offset} 音分`;
+  const directionText = octaveQuestion.direction === "up" ? "高八度" : "低八度";
+
+  results = [{
+    midi: octaveQuestion.target,
+    detectedMidi,
+    cents,
+    score,
+  }];
+  renderOctaveCards(true);
+  document.querySelectorAll(".note-card").forEach((card) => card.classList.add("correct"));
+  els.singingConsole.hidden = true;
+  els.singButton.disabled = true;
+  els.helperText.textContent = "完成！已检测你唱出的八度目标音。";
+  els.totalScore.textContent = `${total}%`;
+  els.resultTitle.textContent =
+    total >= 92 ? "八度联想很准" :
+    total >= 80 ? "方向对了，再收紧音准" :
+    "先在心里听见目标八度";
+  els.resultList.innerHTML = `<div class="result-chip ${score >= 85 ? "good" : "needs-work"}">
+    <strong>${sourceLabel.name}${sourceLabel.octave} → ${targetLabel.name}${targetLabel.octave}</strong>
+    要唱${directionText} · 你唱成 ${sungLabel.name}${sungLabel.octave} · ${detail}
+  </div>`;
   els.resultPanel.hidden = false;
   els.resultPanel.scrollIntoView({ behavior: "smooth", block: "nearest" });
 }
@@ -1063,7 +1198,7 @@ els.singButton.addEventListener("click", toggleListening);
 els.submitAnswerButton.addEventListener("click", submitChordAnswers);
 els.newQuestionButton.addEventListener("click", createSequence);
 els.nextButton.addEventListener("click", nextQuestion);
-[els.trainingMode, els.noteCount, els.range, els.difficulty, els.chordLevel, els.chordKey].forEach((input) => {
+[els.trainingMode, els.noteCount, els.range, els.difficulty, els.chordLevel, els.chordKey, els.octaveDirection].forEach((input) => {
   input.addEventListener("change", createSequence);
 });
 window.addEventListener("pagehide", () => {

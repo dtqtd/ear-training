@@ -36,6 +36,7 @@
           <select id="trainingMode">
             <option value="melody" selected>旋律音准</option>
             <option value="chords">和弦级数</option>
+            <option value="octave">八度联想</option>
           </select>
         </label>
         <label>
@@ -100,6 +101,14 @@
             <option value="9">A 大调</option>
             <option value="5">F 大调</option>
             <option value="10">B♭ 大调</option>
+          </select>
+        </label>
+        <label id="octaveDirectionSetting" hidden>
+          <span>八度方向</span>
+          <select id="octaveDirection">
+            <option value="random" selected>随机方向</option>
+            <option value="up">低音 → 唱高八度</option>
+            <option value="down">高音 → 唱低八度</option>
           </select>
         </label>
       </div>
@@ -195,6 +204,6 @@
     </footer>
   </main>
 
-  <script src="app.js?v=13"></script>
+  <script src="app.js?v=14"></script>
 </body>
 </html>
