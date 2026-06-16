@@ -6,6 +6,14 @@ const RANGES = {
   high: [55, 79],
 };
 const MAJOR_KEYS = [0, 2, 5, 7, 9, 10];
+const KEY_LABELS = {
+  0: "C",
+  2: "D",
+  5: "F",
+  7: "G",
+  9: "A",
+  10: "B♭",
+};
 const DEGREE_OPTIONS = [
   { degree: 1, roman: "I" },
   { degree: 2, roman: "ii" },
@@ -15,34 +23,40 @@ const DEGREE_OPTIONS = [
   { degree: 6, roman: "vi" },
   { degree: 7, roman: "vii°" },
 ];
+const UPPER_ROMANS = ["I", "II", "III", "IV", "V", "VI", "VII"];
 const MAJOR_SCALE = [0, 2, 4, 5, 7, 9, 11];
-const TRIAD_INTERVALS = {
-  1: [0, 4, 7],
-  2: [0, 3, 7],
-  3: [0, 3, 7],
-  4: [0, 4, 7],
-  5: [0, 4, 7],
-  6: [0, 3, 7],
-  7: [0, 3, 6],
+const DIATONIC_TRIADS = {
+  1: { label: "I", intervals: [0, 4, 7] },
+  2: { label: "ii", intervals: [0, 3, 7] },
+  3: { label: "iii", intervals: [0, 3, 7] },
+  4: { label: "IV", intervals: [0, 4, 7] },
+  5: { label: "V", intervals: [0, 4, 7] },
+  6: { label: "vi", intervals: [0, 3, 7] },
+  7: { label: "vii°", intervals: [0, 3, 6] },
 };
-const SEVENTH_INTERVALS = {
-  1: [0, 4, 7, 11],
-  2: [0, 3, 7, 10],
-  3: [0, 3, 7, 10],
-  4: [0, 4, 7, 11],
-  5: [0, 4, 7, 10],
-  6: [0, 3, 7, 10],
-  7: [0, 3, 6, 10],
+const DIATONIC_SEVENTHS = {
+  1: { label: "Imaj7", intervals: [0, 4, 7, 11] },
+  2: { label: "ii7", intervals: [0, 3, 7, 10] },
+  3: { label: "iii7", intervals: [0, 3, 7, 10] },
+  4: { label: "IVmaj7", intervals: [0, 4, 7, 11] },
+  5: { label: "V7", intervals: [0, 4, 7, 10] },
+  6: { label: "vi7", intervals: [0, 3, 7, 10] },
+  7: { label: "viiø7", intervals: [0, 3, 6, 10] },
 };
-const EXTENDED_INTERVALS = {
-  1: [0, 4, 7, 11, 14],
-  2: [0, 3, 7, 10, 14],
-  3: [0, 3, 7, 10, 14],
-  4: [0, 4, 7, 11, 14],
-  5: [0, 4, 7, 10, 14, 21],
-  6: [0, 3, 7, 10, 14],
-  7: [0, 3, 6, 10, 14],
-};
+const MIXED_CHORD_TYPES = [
+  { suffix: "", intervals: [0, 4, 7] },
+  { suffix: "m", intervals: [0, 3, 7] },
+  { suffix: "°", intervals: [0, 3, 6] },
+  { suffix: "+", intervals: [0, 4, 8] },
+  { suffix: "sus4", intervals: [0, 5, 7] },
+  { suffix: "7", intervals: [0, 4, 7, 10] },
+  { suffix: "maj7", intervals: [0, 4, 7, 11] },
+  { suffix: "m7", intervals: [0, 3, 7, 10] },
+  { suffix: "ø7", intervals: [0, 3, 6, 10] },
+  { suffix: "maj9", intervals: [0, 4, 7, 11, 14] },
+  { suffix: "m9", intervals: [0, 3, 7, 10, 14] },
+  { suffix: "13", intervals: [0, 4, 7, 10, 21] },
+];
 const COMMON_PROGRESSIONS = [
   [1, 5, 6, 4],
   [1, 4, 5, 1],
@@ -232,6 +246,7 @@ function createChordQuestion() {
       degree,
       level: chordLevel,
       key: chordKey,
+      type: chordLevel === "extended" ? randomItem(MIXED_CHORD_TYPES) : null,
     });
   }
 
@@ -278,23 +293,34 @@ function updateModeUI() {
   els.playButton.querySelector(".button-icon").textContent = "▶";
 }
 
-function degreeLabel(degree, level = chordLevel) {
-  const base = DEGREE_OPTIONS.find((item) => item.degree === degree)?.roman || "?";
-  if (level === "triads") return base;
-  if (level === "sevenths") {
-    if (degree === 1 || degree === 4) return `${base}maj7`;
-    if (degree === 5) return `${base}7`;
-    if (degree === 7) return `${base}ø7`;
-    return `${base}7`;
-  }
-  if (degree === 1 || degree === 4) return `${base}maj9`;
-  if (degree === 5) return `${base}13`;
-  if (degree === 7) return `${base}ø9`;
-  return `${base}9`;
+function chordDefinition(chord) {
+  if (chord.level === "triads") return DIATONIC_TRIADS[chord.degree];
+  if (chord.level === "sevenths") return DIATONIC_SEVENTHS[chord.degree];
+  const type = chord.type || randomItem(MIXED_CHORD_TYPES);
+  return {
+    label: mixedChordLabel(chord.degree, type.suffix),
+    intervals: type.intervals,
+  };
+}
+
+function mixedChordLabel(degree, suffix) {
+  const upper = UPPER_ROMANS[degree - 1] || "?";
+  const lower = upper.toLowerCase();
+  if (suffix === "m") return lower;
+  if (suffix === "m7") return `${lower}7`;
+  if (suffix === "m9") return `${lower}9`;
+  if (suffix === "°") return `${lower}°`;
+  if (suffix === "ø7") return `${lower}ø7`;
+  return `${upper}${suffix}`;
+}
+
+function chordLabel(chord) {
+  return chordDefinition(chord).label;
 }
 
 function keyLabel(key) {
-  return `${NOTE_NAMES[((key % 12) + 12) % 12]} 大调`;
+  const normalizedKey = ((key % 12) + 12) % 12;
+  return `${KEY_LABELS[normalizedKey] || NOTE_NAMES[normalizedKey]} 大调`;
 }
 
 function renderChordCards(reveal = false) {
@@ -304,7 +330,7 @@ function renderChordCards(reveal = false) {
     card.className = `note-card${reveal ? "" : " hidden-note"}`;
     card.dataset.index = index;
     card.innerHTML = reveal
-      ? `<span>${degreeLabel(chord.degree, chord.level)}<small>${keyLabel(chord.key)}</small></span>`
+      ? `<span>${chordLabel(chord)}<small>${keyLabel(chord.key)}</small></span>`
       : "<span>?</span>";
     els.noteTrack.append(card);
     if (index < chordProgression.length - 1) {
@@ -441,11 +467,7 @@ async function playSequence() {
 function chordMidiNotes(chord) {
   const scaleDegreeOffset = MAJOR_SCALE[chord.degree - 1];
   const root = 48 + chord.key + scaleDegreeOffset;
-  const intervals = chord.level === "triads"
-    ? TRIAD_INTERVALS[chord.degree]
-    : chord.level === "sevenths"
-      ? SEVENTH_INTERVALS[chord.degree]
-      : EXTENDED_INTERVALS[chord.degree];
+  const intervals = chordDefinition(chord).intervals;
   const voicing = intervals.map((interval) => root + interval);
   const bass = root - 12;
   return [bass, ...voicing.map((midi, index) => midi + (index > 2 ? 12 : 0))];
@@ -491,7 +513,7 @@ async function playChordProgression() {
     const startAt = context.currentTime + 0.08;
     const chordLength = 1.08;
     const gap = 0.15;
-    const tonic = { degree: 1, level: chordLevel, key: chordKey };
+    const tonic = { degree: 1, level: "triads", key: chordKey, type: null };
     const tonicNotes = chordMidiNotes(tonic);
 
     // Establish the key before the actual question.
@@ -942,7 +964,7 @@ function submitChordAnswers() {
     total >= 70 ? "不错，听感已经抓住了" :
     "先记住低音和解决方向";
   els.resultList.innerHTML = chordProgression.map((chord, index) => {
-    const expected = degreeLabel(chord.degree, chord.level);
+    const expected = chordLabel(chord);
     const answerDegree = answers[index];
     const answerLabel = DEGREE_OPTIONS.find((item) => item.degree === answerDegree)?.roman || "?";
     const correct = answerDegree === chord.degree;
