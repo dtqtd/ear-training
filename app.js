@@ -5,14 +5,70 @@ const RANGES = {
   middle: [48, 72],
   high: [55, 79],
 };
+const MAJOR_KEYS = [0, 2, 5, 7, 9, 10];
+const DEGREE_OPTIONS = [
+  { degree: 1, roman: "I" },
+  { degree: 2, roman: "ii" },
+  { degree: 3, roman: "iii" },
+  { degree: 4, roman: "IV" },
+  { degree: 5, roman: "V" },
+  { degree: 6, roman: "vi" },
+  { degree: 7, roman: "vii°" },
+];
+const MAJOR_SCALE = [0, 2, 4, 5, 7, 9, 11];
+const TRIAD_INTERVALS = {
+  1: [0, 4, 7],
+  2: [0, 3, 7],
+  3: [0, 3, 7],
+  4: [0, 4, 7],
+  5: [0, 4, 7],
+  6: [0, 3, 7],
+  7: [0, 3, 6],
+};
+const SEVENTH_INTERVALS = {
+  1: [0, 4, 7, 11],
+  2: [0, 3, 7, 10],
+  3: [0, 3, 7, 10],
+  4: [0, 4, 7, 11],
+  5: [0, 4, 7, 10],
+  6: [0, 3, 7, 10],
+  7: [0, 3, 6, 10],
+};
+const EXTENDED_INTERVALS = {
+  1: [0, 4, 7, 11, 14],
+  2: [0, 3, 7, 10, 14],
+  3: [0, 3, 7, 10, 14],
+  4: [0, 4, 7, 11, 14],
+  5: [0, 4, 7, 10, 14, 21],
+  6: [0, 3, 7, 10, 14],
+  7: [0, 3, 6, 10, 14],
+};
+const COMMON_PROGRESSIONS = [
+  [1, 5, 6, 4],
+  [1, 4, 5, 1],
+  [6, 4, 1, 5],
+  [2, 5, 1, 6],
+  [1, 6, 2, 5],
+  [4, 5, 3, 6],
+  [1, 3, 4, 5],
+  [1, 2, 5, 1],
+];
 const MIN_RMS = 0.003;
 const MIN_RECORDING_MS = 700;
 
 const els = {
+  trainingMode: document.querySelector("#trainingMode"),
   noteCount: document.querySelector("#noteCount"),
+  countLabel: document.querySelector("#countLabel"),
   range: document.querySelector("#range"),
+  rangeSetting: document.querySelector("#rangeSetting"),
   difficulty: document.querySelector("#difficulty"),
+  difficultySetting: document.querySelector("#difficultySetting"),
   tolerance: document.querySelector("#tolerance"),
+  chordLevel: document.querySelector("#chordLevel"),
+  chordLevelSetting: document.querySelector("#chordLevelSetting"),
+  chordKey: document.querySelector("#chordKey"),
+  chordKeySetting: document.querySelector("#chordKeySetting"),
   noteTrack: document.querySelector("#noteTrack"),
   playButton: document.querySelector("#playButton"),
   singButton: document.querySelector("#singButton"),
@@ -31,6 +87,9 @@ const els = {
   recordingTime: document.querySelector("#recordingTime"),
   volumeBar: document.querySelector("#volumeBar"),
   inputState: document.querySelector("#inputState"),
+  chordAnswerPanel: document.querySelector("#chordAnswerPanel"),
+  answerGrid: document.querySelector("#answerGrid"),
+  submitAnswerButton: document.querySelector("#submitAnswerButton"),
   helperText: document.querySelector("#helperText"),
   resultPanel: document.querySelector("#resultPanel"),
   resultList: document.querySelector("#resultList"),
@@ -39,6 +98,10 @@ const els = {
 };
 
 let sequence = [];
+let chordProgression = [];
+let currentMode = "melody";
+let chordKey = 0;
+let chordLevel = "triads";
 let attempt = 1;
 let audioContext;
 let analyser;
@@ -77,6 +140,25 @@ function randomItem(items) {
   return items[Math.floor(Math.random() * items.length)];
 }
 
+function getSelectedCount({ min = 2, max = 8 } = {}) {
+  if (els.noteCount.value === "random") {
+    return min + Math.floor(Math.random() * (max - min + 1));
+  }
+  return Number(els.noteCount.value);
+}
+
+function resolveMelodyDifficulty() {
+  return els.difficulty.value === "random"
+    ? randomItem(["easy", "medium", "hard"])
+    : els.difficulty.value;
+}
+
+function resolveChordLevel() {
+  return els.chordLevel.value === "random"
+    ? randomItem(["triads", "sevenths", "extended"])
+    : els.chordLevel.value;
+}
+
 function median(values) {
   if (!values.length) return 0;
   const sorted = [...values].sort((a, b) => a - b);
@@ -89,9 +171,25 @@ function median(values) {
 function createSequence() {
   pauseListening({ message: "" });
   resetPlayback();
-  const count = Number(els.noteCount.value);
+  currentMode = els.trainingMode.value;
+  updateModeUI();
+  els.resultPanel.hidden = true;
+  els.singingConsole.hidden = true;
+  els.chordAnswerPanel.hidden = currentMode !== "chords";
+  results = [];
+
+  if (currentMode === "chords") {
+    createChordQuestion();
+    return;
+  }
+
+  createMelodyQuestion();
+}
+
+function createMelodyQuestion() {
+  const count = getSelectedCount({ min: 2, max: 8 });
   const [min, max] = RANGES[els.range.value];
-  const difficulty = els.difficulty.value;
+  const difficulty = resolveMelodyDifficulty();
   const candidates = [];
 
   for (let midi = min; midi <= max; midi += 1) {
@@ -115,13 +213,34 @@ function createSequence() {
     sequence.push(randomItem(options));
   }
 
-  results = [];
-  els.resultPanel.hidden = true;
-  els.singingConsole.hidden = true;
   els.singButton.disabled = false;
+  els.singButton.hidden = false;
   els.playButton.disabled = false;
   els.helperText.textContent = "播放并记住乐句，然后一口气自然哼完全部音符。";
   renderNotes(false);
+}
+
+function createChordQuestion() {
+  const count = getSelectedCount({ min: 2, max: 6 });
+  chordLevel = resolveChordLevel();
+  chordKey = els.chordKey.value === "random" ? randomItem(MAJOR_KEYS) : Number(els.chordKey.value);
+  const source = randomItem(COMMON_PROGRESSIONS);
+  chordProgression = [];
+  for (let i = 0; i < count; i += 1) {
+    const degree = source[i % source.length];
+    chordProgression.push({
+      degree,
+      level: chordLevel,
+      key: chordKey,
+    });
+  }
+
+  els.singButton.hidden = true;
+  els.playButton.disabled = false;
+  els.submitAnswerButton.disabled = false;
+  els.helperText.textContent = "先听主和弦建立调性感，再判断后面每个和弦的级数。";
+  renderChordCards(false);
+  renderChordAnswerInputs();
 }
 
 function renderNotes(reveal = false) {
@@ -143,6 +262,78 @@ function renderNotes(reveal = false) {
   });
 }
 
+function updateModeUI() {
+  const chordMode = els.trainingMode.value === "chords";
+  els.countLabel.textContent = chordMode ? "和弦数量" : "音符数量";
+  const randomCountOption = els.noteCount.querySelector('option[value="random"]');
+  if (randomCountOption) {
+    randomCountOption.textContent = chordMode ? "任意 2–6 个" : "任意 2–8 个";
+  }
+  els.rangeSetting.hidden = chordMode;
+  els.difficultySetting.hidden = chordMode;
+  els.chordLevelSetting.hidden = !chordMode;
+  els.chordKeySetting.hidden = !chordMode;
+  els.chordAnswerPanel.hidden = !chordMode;
+  els.singButton.hidden = chordMode;
+  els.playButton.querySelector(".button-icon").textContent = "▶";
+}
+
+function degreeLabel(degree, level = chordLevel) {
+  const base = DEGREE_OPTIONS.find((item) => item.degree === degree)?.roman || "?";
+  if (level === "triads") return base;
+  if (level === "sevenths") {
+    if (degree === 1 || degree === 4) return `${base}maj7`;
+    if (degree === 5) return `${base}7`;
+    if (degree === 7) return `${base}ø7`;
+    return `${base}7`;
+  }
+  if (degree === 1 || degree === 4) return `${base}maj9`;
+  if (degree === 5) return `${base}13`;
+  if (degree === 7) return `${base}ø9`;
+  return `${base}9`;
+}
+
+function keyLabel(key) {
+  return `${NOTE_NAMES[((key % 12) + 12) % 12]} 大调`;
+}
+
+function renderChordCards(reveal = false) {
+  els.noteTrack.innerHTML = "";
+  chordProgression.forEach((chord, index) => {
+    const card = document.createElement("div");
+    card.className = `note-card${reveal ? "" : " hidden-note"}`;
+    card.dataset.index = index;
+    card.innerHTML = reveal
+      ? `<span>${degreeLabel(chord.degree, chord.level)}<small>${keyLabel(chord.key)}</small></span>`
+      : "<span>?</span>";
+    els.noteTrack.append(card);
+    if (index < chordProgression.length - 1) {
+      const line = document.createElement("div");
+      line.className = "track-line";
+      els.noteTrack.append(line);
+    }
+  });
+}
+
+function renderChordAnswerInputs() {
+  els.answerGrid.innerHTML = "";
+  chordProgression.forEach((_, index) => {
+    const wrapper = document.createElement("label");
+    wrapper.className = "answer-item";
+    const options = DEGREE_OPTIONS.map((item) => (
+      `<option value="${item.degree}">${item.roman}</option>`
+    )).join("");
+    wrapper.innerHTML = `
+      <span>第 ${index + 1} 个和弦</span>
+      <select class="degree-answer" data-index="${index}">
+        <option value="">选择级数</option>
+        ${options}
+      </select>
+    `;
+    els.answerGrid.append(wrapper);
+  });
+}
+
 function setActiveNote(index) {
   document.querySelectorAll(".note-card").forEach((card) => {
     const cardIndex = Number(card.dataset.index);
@@ -160,9 +351,17 @@ function createAudioContext() {
   }
 }
 
+function withTimeout(promise, timeoutMs, message) {
+  let timeoutId;
+  const timeout = new Promise((_, reject) => {
+    timeoutId = window.setTimeout(() => reject(new Error(message)), timeoutMs);
+  });
+  return Promise.race([promise, timeout]).finally(() => window.clearTimeout(timeoutId));
+}
+
 async function getAudioContext({ recreate = false } = {}) {
   if (recreate && audioContext && audioContext.state !== "closed") {
-    await audioContext.close().catch(() => {});
+    await withTimeout(audioContext.close().catch(() => {}), 800, "AudioContext close timed out").catch(() => {});
     audioContext = null;
   }
   if (!audioContext || audioContext.state === "closed") {
@@ -170,15 +369,15 @@ async function getAudioContext({ recreate = false } = {}) {
   }
 
   if (audioContext.state !== "running") {
-    await audioContext.resume().catch(() => {});
+    await withTimeout(audioContext.resume().catch(() => {}), 1200, "AudioContext resume timed out");
   }
 
   // Safari can leave a context in its non-standard "interrupted" state after
   // repeated reloads, calls, or backgrounding. Recreate it from this user tap.
   if (audioContext.state !== "running") {
-    await audioContext.close().catch(() => {});
+    await withTimeout(audioContext.close().catch(() => {}), 800, "AudioContext close timed out").catch(() => {});
     audioContext = createAudioContext();
-    await audioContext.resume().catch(() => {});
+    await withTimeout(audioContext.resume().catch(() => {}), 1200, "AudioContext resume timed out");
   }
 
   if (audioContext.state !== "running") {
@@ -196,6 +395,11 @@ async function getAudioContext({ recreate = false } = {}) {
 
 async function playSequence() {
   if (isPlaying || isListening || isStarting) return;
+  if (currentMode === "chords") {
+    await playChordProgression();
+    return;
+  }
+
   isPlaying = true;
   els.playButton.disabled = true;
   els.singButton.disabled = true;
@@ -231,6 +435,83 @@ async function playSequence() {
   } catch (error) {
     els.helperText.textContent = "音频播放失败，请刷新页面后重试。";
     resetPlayback();
+  }
+}
+
+function chordMidiNotes(chord) {
+  const scaleDegreeOffset = MAJOR_SCALE[chord.degree - 1];
+  const root = 48 + chord.key + scaleDegreeOffset;
+  const intervals = chord.level === "triads"
+    ? TRIAD_INTERVALS[chord.degree]
+    : chord.level === "sevenths"
+      ? SEVENTH_INTERVALS[chord.degree]
+      : EXTENDED_INTERVALS[chord.degree];
+  const voicing = intervals.map((interval) => root + interval);
+  const bass = root - 12;
+  return [bass, ...voicing.map((midi, index) => midi + (index > 2 ? 12 : 0))];
+}
+
+function scheduleTone(context, midi, startAt, duration, gainValue = 0.12, type = "triangle") {
+  const oscillator = context.createOscillator();
+  const gain = context.createGain();
+  oscillator.type = type;
+  oscillator.frequency.value = midiToFrequency(midi);
+  gain.gain.setValueAtTime(0.0001, startAt);
+  gain.gain.exponentialRampToValueAtTime(gainValue, startAt + 0.025);
+  gain.gain.setValueAtTime(gainValue, startAt + duration * 0.72);
+  gain.gain.exponentialRampToValueAtTime(0.0001, startAt + duration);
+  oscillator.connect(gain).connect(context.destination);
+  oscillator.start(startAt);
+  oscillator.stop(startAt + duration + 0.02);
+  playbackOscillators.push(oscillator);
+  oscillator.addEventListener("ended", () => {
+    playbackOscillators = playbackOscillators.filter((item) => item !== oscillator);
+    if (currentMode === "chords" && isPlaying && playbackOscillators.length === 0) {
+      finishChordPlayback();
+    }
+  });
+}
+
+function finishChordPlayback() {
+  resetPlayback();
+  els.submitAnswerButton.disabled = false;
+}
+
+async function playChordProgression() {
+  isPlaying = true;
+  els.playButton.disabled = true;
+  els.submitAnswerButton.disabled = true;
+  try {
+    let context;
+    try {
+      context = await getAudioContext();
+    } catch (error) {
+      context = await getAudioContext({ recreate: true });
+    }
+    const startAt = context.currentTime + 0.08;
+    const chordLength = 1.08;
+    const gap = 0.15;
+    const tonic = { degree: 1, level: chordLevel, key: chordKey };
+    const tonicNotes = chordMidiNotes(tonic);
+
+    // Establish the key before the actual question.
+    scheduleTone(context, 48 + chordKey, startAt, 0.45, 0.13, "sine");
+    tonicNotes.forEach((midi) => scheduleTone(context, midi, startAt + 0.48, 0.82, 0.07));
+
+    const questionStart = startAt + 1.5;
+    chordProgression.forEach((chord, index) => {
+      const chordStart = questionStart + index * (chordLength + gap);
+      chordMidiNotes(chord).forEach((midi, noteIndex) => {
+        scheduleTone(context, midi, chordStart + noteIndex * 0.018, chordLength, noteIndex === 0 ? 0.1 : 0.06);
+      });
+      window.setTimeout(() => setActiveNote(index), Math.max(0, (chordStart - context.currentTime) * 1000));
+    });
+
+    const duration = 1500 + chordProgression.length * (chordLength + gap) * 1000;
+    playbackTimer = window.setTimeout(finishChordPlayback, duration + 160);
+  } catch (error) {
+    els.helperText.textContent = "和弦播放失败，请刷新页面后重试。";
+    finishChordPlayback();
   }
 }
 
@@ -637,6 +918,46 @@ function scorePhrase(detectedNotes) {
   els.resultPanel.scrollIntoView({ behavior: "smooth", block: "nearest" });
 }
 
+function submitChordAnswers() {
+  if (currentMode !== "chords") return;
+  const answers = [...document.querySelectorAll(".degree-answer")].map((select) => Number(select.value));
+  if (answers.some((answer) => !answer)) {
+    els.helperText.textContent = "还有和弦没有选择级数。";
+    return;
+  }
+
+  const totalCorrect = answers.reduce((sum, answer, index) => (
+    sum + (answer === chordProgression[index].degree ? 1 : 0)
+  ), 0);
+  const total = Math.round(totalCorrect / chordProgression.length * 100);
+
+  renderChordCards(true);
+  document.querySelectorAll(".note-card").forEach((card, index) => {
+    card.classList.toggle("correct", answers[index] === chordProgression[index].degree);
+  });
+
+  els.totalScore.textContent = `${total}%`;
+  els.resultTitle.textContent =
+    total === 100 ? "级数全对，调性感很稳" :
+    total >= 70 ? "不错，听感已经抓住了" :
+    "先记住低音和解决方向";
+  els.resultList.innerHTML = chordProgression.map((chord, index) => {
+    const expected = degreeLabel(chord.degree, chord.level);
+    const answerDegree = answers[index];
+    const answerLabel = DEGREE_OPTIONS.find((item) => item.degree === answerDegree)?.roman || "?";
+    const correct = answerDegree === chord.degree;
+    return `<div class="result-chip ${correct ? "good" : "needs-work"}">
+      <strong>${index + 1}. ${correct ? "正确" : "未中"}</strong>
+      你选 ${answerLabel} · 答案 ${expected}
+    </div>`;
+  }).join("");
+  els.helperText.textContent = `调性：${keyLabel(chordKey)}；和弦类型：${
+    chordLevel === "triads" ? "三和弦" : chordLevel === "sevenths" ? "七和弦" : "复杂和弦"
+  }。`;
+  els.resultPanel.hidden = false;
+  els.resultPanel.scrollIntoView({ behavior: "smooth", block: "nearest" });
+}
+
 function nextQuestion() {
   attempt += 1;
   els.attemptNumber.textContent = String(attempt);
@@ -645,9 +966,10 @@ function nextQuestion() {
 
 els.playButton.addEventListener("click", playSequence);
 els.singButton.addEventListener("click", toggleListening);
+els.submitAnswerButton.addEventListener("click", submitChordAnswers);
 els.newQuestionButton.addEventListener("click", createSequence);
 els.nextButton.addEventListener("click", nextQuestion);
-[els.noteCount, els.range, els.difficulty].forEach((input) => {
+[els.trainingMode, els.noteCount, els.range, els.difficulty, els.chordLevel, els.chordKey].forEach((input) => {
   input.addEventListener("change", createSequence);
 });
 window.addEventListener("pagehide", () => {

@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#15130f">
   <title>听见 · 视唱练耳</title>
-  <link rel="stylesheet" href="styles.css?v=3">
+  <link rel="stylesheet" href="styles.css?v=4">
 </head>
 <body>
   <main class="app-shell">
@@ -32,16 +32,31 @@
 
       <div class="settings-grid">
         <label>
-          <span>音符数量</span>
+          <span>训练模式</span>
+          <select id="trainingMode">
+            <option value="melody" selected>旋律音准</option>
+            <option value="chords">和弦级数</option>
+          </select>
+        </label>
+        <label>
+          <span id="countLabel">音符数量</span>
           <select id="noteCount">
+            <option value="random">任意 2–8 个</option>
+            <option value="1">1 个</option>
             <option value="2">2 个</option>
             <option value="3" selected>3 个</option>
             <option value="4">4 个</option>
             <option value="5">5 个</option>
             <option value="6">6 个</option>
+            <option value="7">7 个</option>
+            <option value="8">8 个</option>
+            <option value="9">9 个</option>
+            <option value="10">10 个</option>
+            <option value="11">11 个</option>
+            <option value="12">12 个</option>
           </select>
         </label>
-        <label>
+        <label id="rangeSetting">
           <span>音域</span>
           <select id="range">
             <option value="low">低声部 A2–E4</option>
@@ -49,9 +64,10 @@
             <option value="high">高声部 G3–G5</option>
           </select>
         </label>
-        <label>
+        <label id="difficultySetting">
           <span>难度</span>
           <select id="difficulty">
+            <option value="random">任意难度</option>
             <option value="easy" selected>入门 · 自然音</option>
             <option value="medium">进阶 · 加入升降音</option>
             <option value="hard">挑战 · 大跳更多</option>
@@ -63,6 +79,27 @@
             <option value="35">宽松 ±35 音分</option>
             <option value="25" selected>标准 ±25 音分</option>
             <option value="15">严格 ±15 音分</option>
+          </select>
+        </label>
+        <label id="chordLevelSetting" hidden>
+          <span>和弦难度</span>
+          <select id="chordLevel">
+            <option value="triads" selected>三和弦</option>
+            <option value="sevenths">七和弦</option>
+            <option value="extended">更复杂的和弦</option>
+            <option value="random">任意和弦难度</option>
+          </select>
+        </label>
+        <label id="chordKeySetting" hidden>
+          <span>调性</span>
+          <select id="chordKey">
+            <option value="random" selected>任意大调</option>
+            <option value="0">C 大调</option>
+            <option value="7">G 大调</option>
+            <option value="2">D 大调</option>
+            <option value="9">A 大调</option>
+            <option value="5">F 大调</option>
+            <option value="10">B♭ 大调</option>
           </select>
         </label>
       </div>
@@ -94,6 +131,12 @@
           <span class="button-icon" id="singButtonIcon">●</span>
           <span id="singButtonText">开始演唱</span>
         </button>
+      </div>
+
+      <div class="chord-answer-panel" id="chordAnswerPanel" hidden>
+        <p class="helper-text compact-helper">选择你听到的每个和弦级数，然后提交。</p>
+        <div class="answer-grid" id="answerGrid"></div>
+        <button class="button button-primary compact" id="submitAnswerButton" type="button">提交答案</button>
       </div>
 
       <div class="singing-console" id="singingConsole" hidden>
@@ -152,6 +195,6 @@
     </footer>
   </main>
 
-  <script src="app.js?v=5"></script>
+  <script src="app.js?v=7"></script>
 </body>
 </html>
