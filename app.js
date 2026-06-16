@@ -14,6 +14,8 @@ const KEY_LABELS = {
   9: "A",
   10: "B♭",
 };
+const PIANO_SAMPLE_BASE = "samples/piano";
+const SAMPLE_NOTE_NAMES = ["C", "Db", "D", "Eb", "E", "F", "Gb", "G", "Ab", "A", "Bb", "B"];
 const DEGREE_OPTIONS = [
   { degree: 1, roman: "I" },
   { degree: 2, roman: "ii" },
@@ -123,7 +125,9 @@ let mediaStream;
 let sourceNode;
 let animationFrame;
 let playbackTimer;
-let playbackOscillators = [];
+let playbackNodes = [];
+let pianoSampleCache = new Map();
+let pianoSampleBuffers = new Map();
 let pitchHistory = [];
 let recordedPitches = [];
 let recordingStartedAt = 0;
@@ -436,30 +440,18 @@ async function playSequence() {
     } catch (error) {
       context = await getAudioContext({ recreate: true });
     }
+    await preloadPianoSamples(context, sequence);
     const startAt = context.currentTime + 0.08;
     const noteLength = 0.72;
     sequence.forEach((midi, index) => {
-      const oscillator = context.createOscillator();
-      const gain = context.createGain();
       const noteStart = startAt + index * noteLength;
-      oscillator.type = "sine";
-      oscillator.frequency.value = midiToFrequency(midi);
-      gain.gain.setValueAtTime(0.0001, noteStart);
-      gain.gain.exponentialRampToValueAtTime(0.23, noteStart + 0.025);
-      gain.gain.setValueAtTime(0.23, noteStart + 0.48);
-      gain.gain.exponentialRampToValueAtTime(0.0001, noteStart + 0.64);
-      oscillator.connect(gain).connect(context.destination);
-      oscillator.start(noteStart);
-      oscillator.stop(noteStart + 0.68);
-      playbackOscillators.push(oscillator);
-      oscillator.addEventListener("ended", () => {
-        playbackOscillators = playbackOscillators.filter((item) => item !== oscillator);
-      });
+      schedulePianoSample(context, midi, noteStart, 0.68, 0.82);
       window.setTimeout(() => setActiveNote(index), Math.max(0, (noteStart - context.currentTime) * 1000));
     });
     playbackTimer = window.setTimeout(resetPlayback, sequence.length * noteLength * 1000 + 150);
   } catch (error) {
-    els.helperText.textContent = "音频播放失败，请刷新页面后重试。";
+    console.error(error);
+    els.helperText.textContent = `钢琴音色播放失败：${error.message || "请再点一次播放题目"}`;
     resetPlayback();
   }
 }
@@ -473,22 +465,88 @@ function chordMidiNotes(chord) {
   return [bass, ...voicing.map((midi, index) => midi + (index > 2 ? 12 : 0))];
 }
 
-function scheduleTone(context, midi, startAt, duration, gainValue = 0.12, type = "triangle") {
-  const oscillator = context.createOscillator();
+function pianoSampleName(midi) {
+  const rounded = Math.round(midi);
+  const pitchClass = ((rounded % 12) + 12) % 12;
+  const octave = Math.floor(rounded / 12) - 1;
+  return `${SAMPLE_NOTE_NAMES[pitchClass]}${octave}`;
+}
+
+async function loadPianoSample(context, midi) {
+  const sampleName = pianoSampleName(midi);
+  if (!pianoSampleCache.has(sampleName)) {
+    const samplePromise = loadArrayBuffer(`${PIANO_SAMPLE_BASE}/${sampleName}.mp3`)
+      .then((arrayBuffer) => decodeAudioBuffer(context, arrayBuffer))
+      .then((buffer) => {
+        pianoSampleBuffers.set(sampleName, buffer);
+        return buffer;
+      });
+    pianoSampleCache.set(sampleName, samplePromise);
+  }
+  return pianoSampleCache.get(sampleName);
+}
+
+function decodeAudioBuffer(context, arrayBuffer) {
+  return new Promise((resolve, reject) => {
+    const copy = arrayBuffer.slice(0);
+    try {
+      const maybePromise = context.decodeAudioData(copy, resolve, reject);
+      if (maybePromise && typeof maybePromise.then === "function") {
+        maybePromise.then(resolve).catch(reject);
+      }
+    } catch (error) {
+      reject(error);
+    }
+  });
+}
+
+function loadArrayBuffer(url) {
+  if (window.fetch) {
+    return fetch(url).then((response) => {
+      if (!response.ok) throw new Error(`Piano sample failed: ${url}`);
+      return response.arrayBuffer();
+    });
+  }
+
+  return new Promise((resolve, reject) => {
+    const request = new XMLHttpRequest();
+    request.open("GET", url, true);
+    request.responseType = "arraybuffer";
+    request.onload = () => {
+      if (request.status >= 200 && request.status < 300) {
+        resolve(request.response);
+      } else {
+        reject(new Error(`Piano sample failed: ${url}`));
+      }
+    };
+    request.onerror = () => reject(new Error(`Piano sample failed: ${url}`));
+    request.send();
+  });
+}
+
+async function preloadPianoSamples(context, midiNotes) {
+  const uniqueNotes = [...new Set(midiNotes.map((midi) => Math.round(midi)))];
+  await Promise.all(uniqueNotes.map((midi) => loadPianoSample(context, midi)));
+}
+
+function schedulePianoSample(context, midi, startAt, duration, gainValue = 0.8) {
+  const sampleName = pianoSampleName(midi);
+  const buffer = pianoSampleBuffers.get(sampleName);
+  if (!buffer) throw new Error(`Piano sample ${sampleName} is not loaded`);
+  const source = context.createBufferSource();
   const gain = context.createGain();
-  oscillator.type = type;
-  oscillator.frequency.value = midiToFrequency(midi);
+  source.buffer = buffer;
   gain.gain.setValueAtTime(0.0001, startAt);
-  gain.gain.exponentialRampToValueAtTime(gainValue, startAt + 0.025);
-  gain.gain.setValueAtTime(gainValue, startAt + duration * 0.72);
+  gain.gain.exponentialRampToValueAtTime(gainValue, startAt + 0.012);
+  gain.gain.setValueAtTime(gainValue * 0.7, startAt + duration * 0.46);
   gain.gain.exponentialRampToValueAtTime(0.0001, startAt + duration);
-  oscillator.connect(gain).connect(context.destination);
-  oscillator.start(startAt);
-  oscillator.stop(startAt + duration + 0.02);
-  playbackOscillators.push(oscillator);
-  oscillator.addEventListener("ended", () => {
-    playbackOscillators = playbackOscillators.filter((item) => item !== oscillator);
-    if (currentMode === "chords" && isPlaying && playbackOscillators.length === 0) {
+  source.connect(gain).connect(context.destination);
+  source.start(startAt);
+  source.stop(startAt + duration + 0.08);
+  playbackNodes.push(source);
+  source.addEventListener("ended", () => {
+    playbackNodes = playbackNodes.filter((item) => item !== source);
+    if (currentMode === "chords" && isPlaying && playbackNodes.length === 0) {
       finishChordPlayback();
     }
   });
@@ -515,16 +573,20 @@ async function playChordProgression() {
     const gap = 0.15;
     const tonic = { degree: 1, level: "triads", key: chordKey, type: null };
     const tonicNotes = chordMidiNotes(tonic);
+    const questionNotes = chordProgression.flatMap((chord) => chordMidiNotes(chord));
+    await preloadPianoSamples(context, [48 + chordKey, ...tonicNotes, ...questionNotes]);
 
     // Establish the key before the actual question.
-    scheduleTone(context, 48 + chordKey, startAt, 0.45, 0.13, "sine");
-    tonicNotes.forEach((midi) => scheduleTone(context, midi, startAt + 0.48, 0.82, 0.07));
+    schedulePianoSample(context, 48 + chordKey, startAt, 0.45, 0.58);
+    tonicNotes.forEach((midi, noteIndex) => {
+      schedulePianoSample(context, midi, startAt + 0.48 + noteIndex * 0.012, 0.82, noteIndex === 0 ? 0.58 : 0.42);
+    });
 
     const questionStart = startAt + 1.5;
     chordProgression.forEach((chord, index) => {
       const chordStart = questionStart + index * (chordLength + gap);
       chordMidiNotes(chord).forEach((midi, noteIndex) => {
-        scheduleTone(context, midi, chordStart + noteIndex * 0.018, chordLength, noteIndex === 0 ? 0.1 : 0.06);
+        schedulePianoSample(context, midi, chordStart + noteIndex * 0.018, chordLength, noteIndex === 0 ? 0.58 : 0.36);
       });
       window.setTimeout(() => setActiveNote(index), Math.max(0, (chordStart - context.currentTime) * 1000));
     });
@@ -532,21 +594,22 @@ async function playChordProgression() {
     const duration = 1500 + chordProgression.length * (chordLength + gap) * 1000;
     playbackTimer = window.setTimeout(finishChordPlayback, duration + 160);
   } catch (error) {
-    els.helperText.textContent = "和弦播放失败，请刷新页面后重试。";
+    console.error(error);
+    els.helperText.textContent = `钢琴音色播放失败：${error.message || "请再点一次播放题目"}`;
     finishChordPlayback();
   }
 }
 
 function resetPlayback() {
   clearTimeout(playbackTimer);
-  playbackOscillators.forEach((oscillator) => {
+  playbackNodes.forEach((node) => {
     try {
-      oscillator.stop();
+      node.stop();
     } catch (error) {
-      // The oscillator may already have ended.
+      // The playback node may already have ended.
     }
   });
-  playbackOscillators = [];
+  playbackNodes = [];
   document.querySelectorAll(".note-card").forEach((card) => card.classList.remove("active"));
   els.playButton.disabled = false;
   els.singButton.disabled = false;
