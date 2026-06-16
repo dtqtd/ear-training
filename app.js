@@ -14,8 +14,17 @@ const KEY_LABELS = {
   9: "A",
   10: "B♭",
 };
-const PIANO_SAMPLE_BASE = "samples/piano";
-const SAMPLE_NOTE_NAMES = ["C", "Db", "D", "Eb", "E", "F", "Gb", "G", "Ab", "A", "Bb", "B"];
+const PIANO_SAMPLE_BASE = "samples/grand";
+const GRAND_PIANO_SAMPLES = [
+  ["A0", 21], ["C1", 24], ["Ds1", 27], ["Fs1", 30],
+  ["A1", 33], ["C2", 36], ["Ds2", 39], ["Fs2", 42],
+  ["A2", 45], ["C3", 48], ["Ds3", 51], ["Fs3", 54],
+  ["A3", 57], ["C4", 60], ["Ds4", 63], ["Fs4", 66],
+  ["A4", 69], ["C5", 72], ["Ds5", 75], ["Fs5", 78],
+  ["A5", 81], ["C6", 84], ["Ds6", 87], ["Fs6", 90],
+  ["A6", 93], ["C7", 96], ["Ds7", 99], ["Fs7", 102],
+  ["A7", 105], ["C8", 108],
+].map(([name, midi]) => ({ name, midi }));
 const DEGREE_OPTIONS = [
   { degree: 1, roman: "I" },
   { degree: 2, roman: "ii" },
@@ -465,15 +474,14 @@ function chordMidiNotes(chord) {
   return [bass, ...voicing.map((midi, index) => midi + (index > 2 ? 12 : 0))];
 }
 
-function pianoSampleName(midi) {
-  const rounded = Math.round(midi);
-  const pitchClass = ((rounded % 12) + 12) % 12;
-  const octave = Math.floor(rounded / 12) - 1;
-  return `${SAMPLE_NOTE_NAMES[pitchClass]}${octave}`;
+function nearestPianoSample(midi) {
+  return GRAND_PIANO_SAMPLES.reduce((nearest, sample) => (
+    Math.abs(sample.midi - midi) < Math.abs(nearest.midi - midi) ? sample : nearest
+  ), GRAND_PIANO_SAMPLES[0]);
 }
 
 async function loadPianoSample(context, midi) {
-  const sampleName = pianoSampleName(midi);
+  const sampleName = nearestPianoSample(midi).name;
   if (!pianoSampleCache.has(sampleName)) {
     const samplePromise = loadArrayBuffer(`${PIANO_SAMPLE_BASE}/${sampleName}.mp3`)
       .then((arrayBuffer) => decodeAudioBuffer(context, arrayBuffer))
@@ -525,17 +533,18 @@ function loadArrayBuffer(url) {
 }
 
 async function preloadPianoSamples(context, midiNotes) {
-  const uniqueNotes = [...new Set(midiNotes.map((midi) => Math.round(midi)))];
-  await Promise.all(uniqueNotes.map((midi) => loadPianoSample(context, midi)));
+  const uniqueSamples = [...new Set(midiNotes.map((midi) => nearestPianoSample(midi).midi))];
+  await Promise.all(uniqueSamples.map((midi) => loadPianoSample(context, midi)));
 }
 
 function schedulePianoSample(context, midi, startAt, duration, gainValue = 0.8) {
-  const sampleName = pianoSampleName(midi);
-  const buffer = pianoSampleBuffers.get(sampleName);
-  if (!buffer) throw new Error(`Piano sample ${sampleName} is not loaded`);
+  const sample = nearestPianoSample(midi);
+  const buffer = pianoSampleBuffers.get(sample.name);
+  if (!buffer) throw new Error(`Piano sample ${sample.name} is not loaded`);
   const source = context.createBufferSource();
   const gain = context.createGain();
   source.buffer = buffer;
+  source.playbackRate.value = Math.pow(2, (midi - sample.midi) / 12);
   gain.gain.setValueAtTime(0.0001, startAt);
   gain.gain.exponentialRampToValueAtTime(gainValue, startAt + 0.012);
   gain.gain.setValueAtTime(gainValue * 0.7, startAt + duration * 0.46);
